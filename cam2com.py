@@ -237,7 +237,7 @@ def update_gui():
     while not update_queue.empty():
         frame, x, y, distance = update_queue.get()
         im.set_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        plt.pause(0.08)  # This is the pyplot delay seems to work best
+        plt.pause(0.08)  # This pyplot delay seems to work best
 
     if facetrack_loop:
         root.after(50, update_gui)  # Schedule this method to be called again after 50 ms
