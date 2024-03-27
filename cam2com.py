@@ -11,7 +11,7 @@ import serial.tools.list_ports
 from queue import Queue
 
 # If running on a laptop, make sure it is charging
-# Reduced power modes seem to not have fun running the camera feed
+# Lower-power modes seem to not have fun running the camera feed
 
 # To make this thing thread-safe
 update_queue = Queue()
@@ -26,6 +26,7 @@ alt_font = ('JetBrains Mono NL', 13)
 # Global variables for face position
 face_X, face_Y, face_Distance = -1, -1, -1
 last_X, last_Y, last_Distance = -2, -2, -2
+volumeSetting, lastVolume = 0, -1
 manual_control = False
 facetrack_loop = True
 
@@ -34,7 +35,7 @@ facetrack_loop = True
 # Create the main window
 root = tk.Tk()
 root.title("PASS: Face Tracking and STM32 Communication Interface")
-root.geometry("600x500")
+root.geometry("600x620")
 
 # Test command 'T'
 def toggle_led():
@@ -55,7 +56,10 @@ def toggle_manual_control():
     button_toggle_control.config(text="Use Face-Tracker" if manual_control else "Use Sliders")
     toggle_label.config(text="Now using sliders." if manual_control else "Now using face-tracker.")
     # Might add more to the toggler (hide sliders, etc.)
-    #if manual_control:
+    if manual_control:
+        sliderX.set(face_X)
+        sliderY.set(face_Y)
+        sliderD.set(face_Distance)
         # Add manual control sliders
     #else:
         # Remove manual control sliders
@@ -70,11 +74,16 @@ button_toggle_control.pack(pady=10)
 
 # X, Y, Distance Sliders
 sliderX = tk.Scale(root, from_=0, to=640, orient='horizontal', label='X: Horizontal', length=500, font=alt_font)
-sliderX.pack()
+sliderX.pack(padx=10, pady=10)
+tk.Frame(root, height=1, bg="gray", width=520).pack()
 sliderY = tk.Scale(root, from_=0, to=480, orient='horizontal', label='Y: Vertical', length=500, font=alt_font)
-sliderY.pack()
+sliderY.pack(padx=10, pady=10)
+tk.Frame(root, height=1, bg="gray", width=520).pack()
 sliderD = tk.Scale(root, from_=0, to=100, orient='horizontal', label='Distance', length=500, font=alt_font)
-sliderD.pack()
+sliderD.pack(padx=10, pady=10)
+tk.Frame(root, height=1, bg="gray", width=520).pack()
+sliderV = tk.Scale(root, from_=0, to=100, orient='horizontal', label='Volume', length=500, font=alt_font)
+sliderV.pack()
 
 # Function to quit the program
 def quit_program():
@@ -128,6 +137,7 @@ def serial_thread():
 def send_facepos_values():
     global face_X, face_Y, face_Distance
     global last_X, last_Y, last_Distance
+    global volumeSetting, lastVolume
     try:
         #X
         if face_X != last_X and face_X >= 0: # Only send the command if the value has changed
@@ -147,6 +157,15 @@ def send_facepos_values():
         if face_Distance != last_Distance and face_Distance >= 0:
             last_Distance = face_Distance
             command = f'setDistance {face_Distance}\n'.encode()
+            ser.write(command)
+            ser.flush()
+            time.sleep(0.1)
+            
+        # Volume
+        volumeSetting = (int) (sliderV.get())
+        if volumeSetting != lastVolume and volumeSetting >= 0:
+            lastVolume = volumeSetting
+            command = f'setVolume {volumeSetting}\n'.encode()
             ser.write(command)
             ser.flush()
             time.sleep(0.1)
@@ -237,7 +256,7 @@ def update_gui():
     while not update_queue.empty():
         frame, x, y, distance = update_queue.get()
         im.set_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        plt.pause(0.08)  # This pyplot delay seems to work best
+        plt.pause(0.08)  # This is the pyplot delay seems to work best
 
     if facetrack_loop:
         root.after(50, update_gui)  # Schedule this method to be called again after 50 ms
