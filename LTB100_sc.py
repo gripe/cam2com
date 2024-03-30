@@ -9,12 +9,9 @@
 #        center_x = x + w // 2
 #        center_y = y + h // 2
 #        center_distance = 100 / w
+
 # At 100 cm away, center_distance is 0.25
 # At 200 cm away, center_distance is 0.5
-
-# Here is a sample measurement I took:
-# Away 200 cm and off to the side about 50 cm with a theta of about 14 degrees, Center X was about 314
-
 
 # FROM THE POV OF THE CAMERA
 
