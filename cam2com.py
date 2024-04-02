@@ -9,6 +9,16 @@ import numpy as np
 import serial
 import serial.tools.list_ports
 from queue import Queue
+from multiprocessing import Process
+
+
+
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from simulation import amp_plot
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import math
+
 
 # If running on a laptop, make sure it is charging
 # Reduced power modes seem to not have fun running the camera feed
@@ -17,17 +27,23 @@ from queue import Queue
 update_queue = Queue()
 
 # COM TERMINAL (WHAT MY LAPTOP USES)
-ser = serial.Serial('COM5', 115200, timeout=1)
+try:
+    ser = serial.Serial('COM4', 115200, timeout=1)
+except:
+    ser = 0
 
 # Adjust if text doesn't work:
 # alt_font = ('Courier', 13)
 alt_font = ('JetBrains Mono NL', 13)
 
 # Global variables for face position
-face_X, face_Y, face_Distance = -1, -1, -1
-last_X, last_Y, last_Distance = -2, -2, -2
+face_X, face_Y, face_Distance, delay = -1, -1, -1, 10
+last_X, last_Y, last_Distance, last_Delay = -2, -2, -2, 10
 manual_control = False
 facetrack_loop = True
+
+theta = np.linspace(-math.pi / 2, math.pi / 2, 1000)
+
 
 ### GUI ### GUI ### GUI ###
 
@@ -35,6 +51,23 @@ facetrack_loop = True
 root = tk.Tk()
 root.title("PASS: Face Tracking and STM32 Communication Interface")
 root.geometry("600x500")
+
+# fig = plt.Figure()
+# ax = fig.add_subplot(111)
+# canvas = FigureCanvasTkAgg(fig, master=root)
+# canvas.get_tk_widget().pack(pady = 20)
+
+
+# def animate(i):
+#     line.set_ydata(amp_plot(1000, .02, .035, 0))  # update the data
+#     return line,
+
+
+# theta = theta = np.linspace(-math.pi, math.pi, 1000)
+# theta = np.linspace(-math.pi, math.pi, 1000)
+# line, = ax.plot(theta, np.sin(theta))
+# ani = animation.FuncAnimation(fig, animate, np.arange(1, 200), interval=25, blit=False)
+
 
 # Test command 'T'
 def toggle_led():
@@ -45,7 +78,7 @@ def toggle_led():
         messagebox.showerror("Error", f"Failed to open the serial port: {e}")
 
 # Add a button to the window
-button = tk.Button(root, text="Toggle blue LED", command=toggle_led, font=alt_font, bg='blue', fg='white')
+button = tk.Button(root, text="Toggle blue LED", font=alt_font, bg='blue', fg='white')
 button.pack(pady=20)
 
 # Toggle use manual control / Face-tracking
@@ -76,6 +109,12 @@ sliderY.pack()
 sliderD = tk.Scale(root, from_=0, to=100, orient='horizontal', label='Distance', length=500, font=alt_font)
 sliderD.pack()
 
+sliderA = tk.Scale(root, from_=-90, to=90, orient='horizontal', label='Angle', length=500, font=alt_font)
+sliderA.pack()
+delay = 0
+angle = 0
+last_Angle = 0
+
 # Function to quit the program
 def quit_program():
     global facetrack_loop
@@ -102,54 +141,49 @@ text.pack()
 # Read from the serial port
 def read_from_port():
     while facetrack_loop:
-        line = ser.readline()
-        if line:
-            # Update the text widget with the received line
-            text.insert(tk.END, line.decode())
+        if not ser == 0:
+            line = ser.readline()
+            if line:
+                # Update the text widget with the received line
+                text.insert(tk.END, line.decode())
+                text.see(tk.END)
         time.sleep(0.1)
 
 # Start a new thread that reads from the serial COM port
-threading.Thread(target=read_from_port, daemon=True).start()
+
 
 
 def serial_thread():
-    global face_X, face_Y, face_Distance
-    #global last_X, last_Y, last_Distance
-    while facetrack_loop:
+    global face_X, face_Y, face_Distance, angle
+    global last_X, last_Y, last_Distance, last_Angle
+    while True:
         if manual_control:
             face_X = (int) (sliderX.get())
             face_Y = (int) (sliderY.get())
             face_Distance = (int) (sliderD.get())
+            angle = (int)(sliderA.get()) * math.pi / 180.0 
             #output_str = f"X: {face_X}, Y: {face_Y}, Distance: {face_Distance}"
             #print(output_str, end='\r', flush=True)
+        time.sleep(.01)
         send_facepos_values()
-        time.sleep(1)
-        
 def send_facepos_values():
-    global face_X, face_Y, face_Distance
-    global last_X, last_Y, last_Distance
+    global face_X, face_Y, face_Distance, angle
+    global last_X, last_Y, last_Distance, last_Angle
+    global delay, delay_us
+    
     try:
-        #X
-        if face_X != last_X and face_X >= 0: # Only send the command if the value has changed
-            last_X = face_X # Update the last-used/sent value
-            command = f'setX {face_X}\n'.encode()  # Construct and encode the command
+
+        if angle != last_Angle:
+            last_Angle = angle
+            delay_us = .015 * math.sin(angle) / 343.3
+            delay = delay_us / (208e-7) * 32
+            delay = min(delay,64)
+            delay = max(delay, -64)
+            # print(delay)
+            command = f'setDelay {int(-delay + 64)}\n'.encode()  # Construct and encode the command
             ser.write(command)  # Send the command
             ser.flush()  # Ensure all data is written to the serial port
-            time.sleep(0.1) # A delay between sending commands to prevent spamming the buffer
-        #Y
-        if face_Y != last_Y and face_Y >= 0:
-            last_Y = face_Y
-            command = f'setY {face_Y}\n'.encode()
-            ser.write(command)
-            ser.flush()
-            time.sleep(0.1)
-        #Distance
-        if face_Distance != last_Distance and face_Distance >= 0:
-            last_Distance = face_Distance
-            command = f'setDistance {face_Distance}\n'.encode()
-            ser.write(command)
-            ser.flush()
-            time.sleep(0.1)
+
     except serial.SerialException as e:
         messagebox.showerror("Error", f"Failed to open the serial port: {e}")
 
@@ -157,53 +191,84 @@ def send_facepos_values():
 
 # Load the face-detection model
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
+frame_width = 640
+frame_height = 480
 # Open the webcam:
 # 0 is the default camera
 # 1 is the USB camera (takes 3 minutes to load for some reason)
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)  #3840
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)  #2160
+# cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m','j','p','g'))
+# cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M','J','P','G'))                   
+# cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+cap.set(cv2.CAP_PROP_FPS, 30)
 # For some reason using the plot feature is way faster than just displaying the camera feed
 plt.ion()  # Turn on interactive mode for live updates
-fig, ax = plt.subplots()  # Create a figure and a set of subplots
-plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)  # Adjust subplot parameters (basically fullscreen)
-im = ax.imshow(np.zeros((480, 640, 3)))  # Placeholder for the first frame, adjust the size as necessary
-plt.axis('off')
-    
+# fig, ax = plt.subplots()  # Create a figure and a set of subplots
+# plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)  # Adjust subplot parameters (basically fullscreen)
+# im = ax.imshow(np.zeros((480, 640, 3)))  # Placeholder for the first frame, adjust the size as necessary
+# plt.axis('off')
+
+fig2, ax2 = plt.subplots()  # Create a figure and a set of subplots
+ax2.set_xlabel('Theta (Degrees)')
+ax2.set_ylabel('Decibels')
+# plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)  # Adjust subplot parameters (basically fullscreen)
+frequencies = [100, 500, 800, 1000, 2000, 5000, 10000]
+lines = []
+for i in frequencies:
+    lines += ax2.plot(180 / math.pi * theta, np.sin(theta), label = f'{i} Hz')
+plt.legend()
+ax2.set_ylim(-100, 100)
+
+fov_horizontal=50
+fov_vertical=34.6
+angle_per_pixel_horizontal = fov_horizontal / frame_width
+angle_per_pixel_vertical = fov_vertical / frame_height
 def getFacePositionFromVideo():
-    global face_X, face_Y, face_Distance
+    global face_X, face_Y, face_Distance, angle
     if not manual_control: # Face-tracking enabled
         #print('!~!~! Face-Tracking Loop Working !~!~!')
-        
-        ret, frame = cap.read()
-        if not ret:
-            return False  # Break out of the loop if the frame is not captured properly
+        while True:
+            if manual_control:
+                time.sleep(.5)
+                continue
+            ret, frame = cap.read()
+            if not ret:
+                return False  # Break out of the loop if the frame is not captured properly
 
-        # Convert the frame to grayscale for face detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame = cv2.flip(frame,1)
+            # Convert the frame to grayscale for face detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # frame = cv2.resize(frame, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
 
-        # Detect faces in the frame
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
+            
+            # Detect faces in the frame
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
 
-        # Iterate over detected faces but break (just using the first face found)
-        for (x, y, w, h) in faces:
-            # Calculate the center of the face
-            center_x = x + w // 2
-            center_y = y + h // 2
+            # Iterate over detected faces but break (just using the first face found)
+            for (x, y, w, h) in faces:
+                # Calculate the center of the face
+                face_X = x + w // 2
+                face_Y = y + h // 2
+                # Calculate the distance based on face size (scaling factor can be adjusted)
+                face_Distance = 100 / w
 
-            # Calculate the distance based on face size (scaling factor can be adjusted)
-            center_distance = 10000 / w
+                # Display the center coordinates and distance
+                # output_str = f"X: {center_x}, Y: {center_y}, Distance: {center_distance:.2f}"
+                # print(output_str, end='\r', flush=True)
+                angle = (face_X - frame_width / 2) * angle_per_pixel_horizontal
+                angle = angle * math.pi / 180
+                update_queue.put((frame, face_X, face_Y, face_Distance))
 
-            # Display the center coordinates and distance
-            # output_str = f"X: {center_x}, Y: {center_y}, Distance: {center_distance:.2f}"
-            # print(output_str, end='\r', flush=True)
-            face_X, face_Y, face_Distance = int(center_x), int(center_y), int(center_distance)
-            update_queue.put((frame, face_X, face_Y, face_Distance))
-
-            # Draw a rectangle around the face
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-        
-            break; # Only track the first face
-
+                # Draw a rectangle around the face
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.imshow('Input', frame)
+            c = cv2.waitKey(1)
+            if c == 27:
+                break
+            time.sleep(.1)
         # Left in for reference
         # Avoiding displaying/updating GUI in this function due to it not being thread safe
         # Display the resulting frame using matplotlib
@@ -212,37 +277,40 @@ def getFacePositionFromVideo():
 
         #root.update_idletasks()
         #root.update()
-    
-        return True
 
 # Start the serial thread for sending face position data
-threading.Thread(target=serial_thread, daemon=True).start()
 
 # Main face-tracking function
-def face_tracking():
-    global facetrack_loop
-    while facetrack_loop:
-        #print('=== === ===')
-        if not manual_control:
-            if not getFacePositionFromVideo():
-                #print('~!~!~ Face-Tracking Loop Broken ~!~!~')
-                break  # Exit if video capture failed
-        time.sleep(0.1)  # Delay to prevent burning a hole in my CPU
+# def face_tracking():
+#     global facetrack_loop
+#     while facetrack_loop:
+#         #print('=== === ===')
+#         if not manual_control:
+#             if not getFacePositionFromVideo():
+#                 time.sleep(0.1)  # Delay to prevent burning a hole in my CPU
 
 # Start the face-tracking in a separate thread
-threading.Thread(target=face_tracking, daemon=True).start()
+plot_text = fig2.text(0.50, 0.95, 
+'Delay =', horizontalalignment='center', wrap=True ) 
 
 # Thread-safe GUI update addition to getFacePositionFromVideo()
+factor = 15 * (208e-7) / 32.0
 def update_gui():
-    while not update_queue.empty():
-        frame, x, y, distance = update_queue.get()
-        im.set_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        plt.pause(0.08)  # This pyplot delay seems to work best
-
-    if facetrack_loop:
-        root.after(50, update_gui)  # Schedule this method to be called again after 50 ms
+    global delay, delay_us
+    # delay = math.asin((320.0 - x) / 640.0  * 5000.0 / distance / distance) / math.pi * 1000e-6
+    for i, line in enumerate(lines):
+        if frequencies[i] <= 1400:
+            line.set_ydata(10 * np.log(amp_plot(frequencies[i], .1, .06, 3 * factor * -delay, 12)))
+        else:
+            line.set_ydata(10 * np.log(amp_plot(frequencies[i], .035, .02, 1 * factor *  -delay , 20)))
+    plot_text.set_text(f'Delay = {int(delay * 20.8 / 32)} microseconds')
+    plt.pause(0.08)  # This pyplot delay seems to work best
+    root.after(1, update_gui)
 
 # Main loop
 if __name__ == "__main__":
-    root.after(50, update_gui)
-    root.mainloop()   
+    threading.Thread(target=read_from_port, daemon=True).start()
+    threading.Thread(target=getFacePositionFromVideo, daemon=True).start()
+    threading.Thread(target=serial_thread, daemon=True).start()
+    root.after(1, update_gui)
+    root.mainloop() 
