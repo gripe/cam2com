@@ -52,46 +52,17 @@ root = tk.Tk()
 root.title("PASS: Face Tracking and STM32 Communication Interface")
 root.geometry("600x500")
 
-# fig = plt.Figure()
-# ax = fig.add_subplot(111)
-# canvas = FigureCanvasTkAgg(fig, master=root)
-# canvas.get_tk_widget().pack(pady = 20)
-
-
-# def animate(i):
-#     line.set_ydata(amp_plot(1000, .02, .035, 0))  # update the data
-#     return line,
-
-
-# theta = theta = np.linspace(-math.pi, math.pi, 1000)
-# theta = np.linspace(-math.pi, math.pi, 1000)
-# line, = ax.plot(theta, np.sin(theta))
-# ani = animation.FuncAnimation(fig, animate, np.arange(1, 200), interval=25, blit=False)
-
-
-# Test command 'T'
-def toggle_led():
-    try:
-        ser.write(b'T\n')
-        # messagebox.showinfo("Success", "The 'T' command has been sent.")
-    except serial.SerialException as e:
-        messagebox.showerror("Error", f"Failed to open the serial port: {e}")
-
-# Add a button to the window
-button = tk.Button(root, text="Toggle blue LED", font=alt_font, bg='blue', fg='white')
-button.pack(pady=20)
-
 # Toggle use manual control / Face-tracking
 def toggle_manual_control():
     global manual_control
     manual_control = not manual_control
     button_toggle_control.config(text="Use Face-Tracker" if manual_control else "Use Sliders")
     toggle_label.config(text="Now using sliders." if manual_control else "Now using face-tracker.")
-    # Might add more to the toggler (hide sliders, etc.)
-    #if manual_control:
-        # Add manual control sliders
-    #else:
-        # Remove manual control sliders
+
+def toggle_wobble():
+    global wobble_mode
+    wobble_mode = not wobble_mode
+    button_toggle_wobble.config(text="Turn Off Wobble" if wobble_mode else "Turn On Wobble")
 
 # Add a label above the button
 toggle_label = tk.Label(root, text="Using face-tracker.", font=alt_font)
@@ -101,19 +72,19 @@ toggle_label.pack(pady=10)
 button_toggle_control = tk.Button(root, text="Use Sliders", command=toggle_manual_control, font=alt_font, bg='gray', fg='white')
 button_toggle_control.pack(pady=10)
 
+button_toggle_wobble = tk.Button(root, text="Turn on Wobble", command=toggle_wobble, font=alt_font, bg='gray', fg='white')
+button_toggle_wobble.pack(pady=10)
+
+
+
 # X, Y, Distance Sliders
-sliderX = tk.Scale(root, from_=0, to=640, orient='horizontal', label='X: Horizontal', length=500, font=alt_font)
-sliderX.pack()
-sliderY = tk.Scale(root, from_=0, to=480, orient='horizontal', label='Y: Vertical', length=500, font=alt_font)
-sliderY.pack()
-sliderD = tk.Scale(root, from_=0, to=100, orient='horizontal', label='Distance', length=500, font=alt_font)
-sliderD.pack()
 
 sliderA = tk.Scale(root, from_=-90, to=90, orient='horizontal', label='Angle', length=500, font=alt_font)
 sliderA.pack()
 delay = 0
 angle = 0
 last_Angle = 0
+wobble_mode = True
 
 # Function to quit the program
 def quit_program():
@@ -152,35 +123,31 @@ def read_from_port():
 # Start a new thread that reads from the serial COM port
 
 
-
+counter = 0
 def serial_thread():
     global face_X, face_Y, face_Distance, angle
     global last_X, last_Y, last_Distance, last_Angle
     while True:
         if manual_control:
-            face_X = (int) (sliderX.get())
-            face_Y = (int) (sliderY.get())
-            face_Distance = (int) (sliderD.get())
             angle = (int)(sliderA.get()) * math.pi / 180.0 
-            #output_str = f"X: {face_X}, Y: {face_Y}, Distance: {face_Distance}"
-            #print(output_str, end='\r', flush=True)
         time.sleep(.01)
         send_facepos_values()
 def send_facepos_values():
     global face_X, face_Y, face_Distance, angle
     global last_X, last_Y, last_Distance, last_Angle
-    global delay, delay_us
+    global delay, delay_us, counter
     
     try:
-
-        if angle != last_Angle:
+        if angle != last_Angle or (wobble_mode):
             last_Angle = angle
             delay_us = .015 * math.sin(angle) / 343.3
             delay = delay_us / (208e-7) * 32
-            delay = min(delay,64)
-            delay = max(delay, -64)
-            # print(delay)
-            command = f'setDelay {int(-delay + 64)}\n'.encode()  # Construct and encode the command
+            if wobble_mode:
+                delay += int(40 * math.sin(2 * math.pi * time.time() * 1000 / 3e3))
+            delay = min(delay,80)
+            delay = max(delay, -80)
+            print(delay)
+            command = f'setDelay {int(-delay + 80)}\n'.encode()  # Construct and encode the command
             ser.write(command)  # Send the command
             ser.flush()  # Ensure all data is written to the serial port
 
@@ -198,18 +165,12 @@ frame_height = 480
 # 1 is the USB camera (takes 3 minutes to load for some reason)
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)  #3840
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)  #2160
-# cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m','j','p','g'))
-# cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M','J','P','G'))                   
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)  #2160                 
 # cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
 cap.set(cv2.CAP_PROP_FPS, 30)
 # For some reason using the plot feature is way faster than just displaying the camera feed
 plt.ion()  # Turn on interactive mode for live updates
-# fig, ax = plt.subplots()  # Create a figure and a set of subplots
-# plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)  # Adjust subplot parameters (basically fullscreen)
-# im = ax.imshow(np.zeros((480, 640, 3)))  # Placeholder for the first frame, adjust the size as necessary
-# plt.axis('off')
 
 fig2, ax2 = plt.subplots()  # Create a figure and a set of subplots
 ax2.set_xlabel('Theta (Degrees)')
@@ -222,7 +183,7 @@ for i in frequencies:
 plt.legend()
 ax2.set_ylim(-100, 100)
 
-fov_horizontal=50
+fov_horizontal=57
 fov_vertical=34.6
 angle_per_pixel_horizontal = fov_horizontal / frame_width
 angle_per_pixel_vertical = fov_vertical / frame_height
@@ -232,7 +193,7 @@ def getFacePositionFromVideo():
         #print('!~!~! Face-Tracking Loop Working !~!~!')
         while True:
             if manual_control:
-                time.sleep(.5)
+                time.sleep(.1)
                 continue
             ret, frame = cap.read()
             if not ret:
@@ -241,8 +202,6 @@ def getFacePositionFromVideo():
             frame = cv2.flip(frame,1)
             # Convert the frame to grayscale for face detection
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # frame = cv2.resize(frame, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
-
             
             # Detect faces in the frame
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
@@ -269,27 +228,7 @@ def getFacePositionFromVideo():
             if c == 27:
                 break
             time.sleep(.1)
-        # Left in for reference
-        # Avoiding displaying/updating GUI in this function due to it not being thread safe
-        # Display the resulting frame using matplotlib
-        #im.set_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        #plt.pause(0.1)  # Delay to prevent burning a hole in my CPU
 
-        #root.update_idletasks()
-        #root.update()
-
-# Start the serial thread for sending face position data
-
-# Main face-tracking function
-# def face_tracking():
-#     global facetrack_loop
-#     while facetrack_loop:
-#         #print('=== === ===')
-#         if not manual_control:
-#             if not getFacePositionFromVideo():
-#                 time.sleep(0.1)  # Delay to prevent burning a hole in my CPU
-
-# Start the face-tracking in a separate thread
 plot_text = fig2.text(0.50, 0.95, 
 'Delay =', horizontalalignment='center', wrap=True ) 
 
